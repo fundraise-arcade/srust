@@ -6,4 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-srt-rs = { git = "https://github.com/fundraise-arcade/srt-rs.git", version = "0.2.4" }
+futures = { version = "0.3" }
+nom = "7.1.3"
+srt-rs = { git = "https://github.com/fundraise-arcade/srt-rs.git", version = "0.3.0" }
+tokio = { version = "1", features = ["full"] }

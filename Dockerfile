@@ -18,5 +18,5 @@ RUN cargo build --release
 COPY ./ ./
 RUN cargo build --release
 
-CMD bash
-#CMD cargo run --release
+#CMD bash
+CMD cargo run --release
