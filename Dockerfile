@@ -11,7 +11,7 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 WORKDIR /usr/src/srt-rust-server
 
 # build dependencies with dummy main file
-COPY ./Cargo.toml ./Cargo.lock ./
+COPY ./Cargo.toml ./
 RUN mkdir src/ && echo "fn main() {}" > src/main.rs
 RUN cargo build --release
 
