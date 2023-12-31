@@ -56,14 +56,44 @@ impl From<SrtError> for Error {
 
 type Result<T> = std::result::Result<T, Error>;
 
+type Payload = [u8; 1316 * 1];
+
 struct Channel {
-    tx: broadcast::Sender<[u8; 1316 * 64]>
+    tx: broadcast::Sender<Payload>
 }
 
 impl Channel {
     fn new() -> Self {
         let (tx, _) = broadcast::channel(1024);
         Self { tx }
+    }
+
+    fn receiver(&self) -> Receiver {
+        Receiver { rx: self.tx.subscribe() }
+    }
+
+    fn sender(&self) -> Sender {
+        Sender { tx: self.tx.clone() }
+    }
+}
+
+struct Receiver {
+    rx: broadcast::Receiver<Payload>
+}
+
+impl Receiver {
+    async fn recv(&mut self) -> std::result::Result<Payload, broadcast::error::RecvError> {
+        self.rx.recv().await
+    }
+}
+
+struct Sender {
+    tx: broadcast::Sender<Payload>
+}
+
+impl Sender {
+    fn send(&self, buf: Payload) -> std::result::Result<usize, broadcast::error::SendError<Payload>> {
+        self.tx.send(buf)
     }
 }
 
@@ -112,9 +142,9 @@ async fn run() -> Result<()> {
             &"request" => {
                 let resource = dict.get("r").expect("dict.get(\"r\")").to_string();
                 if let Some(channel) = channels.get(&resource) {
-                    let rx = channel.tx.subscribe();
+                    let receiver = channel.receiver();
                     tokio::spawn(async move {
-                        if let Err(e) = handle_request(rx, stream, client_addr).await {
+                        if let Err(e) = handle_request(receiver, stream, client_addr).await {
                             println!("Error handling request from {}: {:?}", client_addr, e);
                         }
                     });
@@ -123,9 +153,9 @@ async fn run() -> Result<()> {
             &"publish" => {
                 let user = dict.get("u").expect("dict.get(\"u\")").to_string();
                 channels.insert(user.clone(), Channel::new());
-                let tx = channels.get(&user).expect("channels.get(&user)").tx.clone();
+                let sender = channels.get(&user).expect("channels.get(&user)").sender();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_publish(tx, stream, client_addr).await {
+                    if let Err(e) = handle_publish(sender, stream, client_addr).await {
                         println!("Error handling publish from {}: {:?}", client_addr, e);
                     }
                 });
@@ -138,15 +168,11 @@ async fn run() -> Result<()> {
     //Ok(srt::cleanup()?)
 }
 
-async fn handle_request(mut rx: broadcast::Receiver<[u8; 1316 * 64]>, mut stream: SrtAsyncStream, _client_addr: SocketAddr) -> Result<()> {
+async fn handle_request(mut receiver: Receiver, mut stream: SrtAsyncStream, _client_addr: SocketAddr) -> Result<()> {
     loop {
-        match rx.recv().await {
+        match receiver.recv().await {
             Ok(buffer) => {
-                for n in 0..63 {
-                    let start = n * 1316;
-                    let end = start + 1316;
-                    stream.write(&buffer[start..end]).await?;
-                }
+                stream.write(&buffer).await?;
             },
             Err(broadcast::error::RecvError::Closed) => { break; },
             Err(broadcast::error::RecvError::Lagged(_)) => { println!("Client thread is lagging behind!"); }
@@ -155,15 +181,11 @@ async fn handle_request(mut rx: broadcast::Receiver<[u8; 1316 * 64]>, mut stream
     Ok(())
 }
 
-async fn handle_publish(tx: broadcast::Sender<[u8; 1316 * 64]>, mut stream: SrtAsyncStream, _client_addr: SocketAddr) -> Result<()> {
+async fn handle_publish(sender: Sender, mut stream: SrtAsyncStream, _client_addr: SocketAddr) -> Result<()> {
     loop {
-        let mut buffer = [0; 1316 * 64];
-        for n in 0..63 {
-            let start = n * 1316;
-            let end = start + 1316;
-            stream.read(&mut buffer[start..end]).await?;
-        }
-        if let Err(_) = tx.send(buffer) {}
+        let mut buffer = [0; 1316 * 1];
+        stream.read(&mut buffer).await?;
+        if let Err(_) = sender.send(buffer) {}
     }
 }
 
