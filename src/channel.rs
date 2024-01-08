@@ -46,16 +46,16 @@ impl Channel {
         Receiver { rx: self.audio1.subscribe() }
     }
 
-    pub fn send_video(&self, buf: ChannelMessage) -> std::result::Result<usize, broadcast::error::SendError<ChannelMessage>> {
-        self.video.send(buf)
+    pub fn send_video(&self, buf: ChannelMessage) -> Result<usize> {
+        Ok(self.video.send(buf)?)
     }
 
-    pub fn send_audio0(&self, buf: ChannelMessage) -> std::result::Result<usize, broadcast::error::SendError<ChannelMessage>> {
-        self.audio0.send(buf)
+    pub fn send_audio0(&self, buf: ChannelMessage) -> Result<usize> {
+        Ok(self.audio0.send(buf)?)
     }
 
-    pub fn send_audio1(&self, buf: ChannelMessage) -> std::result::Result<usize, broadcast::error::SendError<ChannelMessage>> {
-        self.audio1.send(buf)
+    pub fn send_audio1(&self, buf: ChannelMessage) -> Result<usize> {
+        Ok(self.audio1.send(buf)?)
     }
 }
 
