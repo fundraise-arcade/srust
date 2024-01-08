@@ -169,7 +169,7 @@ async fn handle_request(mut receiver: Receiver, mut stream: SrtAsyncStream, _cli
     Ok(())
 }
 
-async fn handle_publish(channel: Channel, mut stream: SrtAsyncStream, _client_addr: SocketAddr) -> Result<()> {
+async fn handle_publish(mut channel: Channel, mut stream: SrtAsyncStream, _client_addr: SocketAddr) -> Result<()> {
     let mut pmt_pid: Option<u16> = None;
     loop {
         let mut buf = BytesMut::zeroed(1316);
@@ -203,9 +203,9 @@ async fn handle_publish(channel: Channel, mut stream: SrtAsyncStream, _client_ad
             //println!("PID = 0x{:04X}", packet.pid);
             match packet.pid {
                 0x0 => {
-                    if let Err(_) = channel.send_video(ChannelMessage::new(packet.clone())) {}
-                    if let Err(_) = channel.send_audio0(ChannelMessage::new(packet.clone())) {}
-                    if let Err(_) = channel.send_audio1(ChannelMessage::new(packet.clone())) {}
+                    channel.send_video(ChannelMessage::new(packet.clone()));
+                    channel.send_audio0(ChannelMessage::new(packet.clone()));
+                    channel.send_audio1(ChannelMessage::new(packet.clone()));
 
                     let psi = packet.psi()?;
                     if let Some(PsiData::Pat(ref pat)) = psi.data {
@@ -213,20 +213,16 @@ async fn handle_publish(channel: Channel, mut stream: SrtAsyncStream, _client_ad
                     }
                 }
                 0x100 => {
-                    if let Err(_) = channel.send_video(ChannelMessage::new(packet.clone())) {}
+                    channel.send_video(ChannelMessage::new(packet.clone()));
                 },
                 0x101 => {
-                    if let Err(_) = channel.send_audio0(ChannelMessage::new(packet.clone())) {}
+                    channel.send_audio0(ChannelMessage::new(packet.clone()));
                 }
                 0x102 => {
-                    if let Err(_) = channel.send_audio1(ChannelMessage::new(packet.clone())) {}
+                    channel.send_audio1(ChannelMessage::new(packet.clone()));
                 }
                 pid => {
                     if Some(pid) == pmt_pid {
-                        //if let Err(_) = channel.send_video(ChannelMessage::new(packet.clone())) {}
-                        //if let Err(_) = channel.send_audio0(ChannelMessage::new(packet.clone())) {}
-                        //if let Err(_) = channel.send_audio1(ChannelMessage::new(packet.clone())) {}
-
                         let psi = packet.psi()?;
                         if let Some(PsiData::Pmt(ref pmt)) = psi.data {
                             let mut audio = 0;
@@ -238,7 +234,7 @@ async fn handle_publish(channel: Channel, mut stream: SrtAsyncStream, _client_ad
                                     new_pmt.program_definitions = vec!(program_definition.clone());
                                     new_packet.set_psi(new_psi)?;
 
-                                    if let Err(_) = channel.send_video(ChannelMessage::new(new_packet)) {}
+                                    channel.send_video(ChannelMessage::new(new_packet));
                                 } else if program_definition.stream_type == 0x0F && audio < 2 {
                                     let mut new_packet = packet.clone();
                                     let mut new_psi = new_packet.psi()?;
@@ -247,8 +243,8 @@ async fn handle_publish(channel: Channel, mut stream: SrtAsyncStream, _client_ad
                                     new_packet.set_psi(new_psi)?;
 
                                     match audio {
-                                        0 => if let Err(_) = channel.send_audio0(ChannelMessage::new(new_packet)) {},
-                                        1 => if let Err(_) = channel.send_audio1(ChannelMessage::new(new_packet)) {},
+                                        0 => channel.send_audio0(ChannelMessage::new(new_packet)),
+                                        1 => channel.send_audio1(ChannelMessage::new(new_packet)),
                                         _ => {}
                                     }
 
