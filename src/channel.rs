@@ -1,3 +1,4 @@
+use crate::error::*;
 use crate::MpegTsPacket;
 use tokio::sync::broadcast;
 
@@ -9,6 +10,12 @@ pub struct ChannelMessage {
 impl ChannelMessage {
     pub fn new(packet: MpegTsPacket) -> Self {
         Self { packet }
+    }
+}
+
+impl From<broadcast::error::SendError<ChannelMessage>> for Error {
+    fn from(_: broadcast::error::SendError<ChannelMessage>) -> Self {
+        Self::ChannelSend
     }
 }
 

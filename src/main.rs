@@ -1,14 +1,15 @@
-mod mpegts;
 mod channel;
+mod error;
+mod mpegts;
 
 use bytes::BytesMut;
 use crate::channel::*;
+use crate::error::*;
 use crate::mpegts::*;
 use srt_rs as srt;
 use srt_rs::SrtAsyncStream;
-use srt_rs::error::{SrtError, SrtRejectReason};
+use srt_rs::error::SrtRejectReason;
 use std::collections::HashMap;
-use std::fmt::Debug;
 use std::net::SocketAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::broadcast;
@@ -46,34 +47,6 @@ fn stream_id_parser(input: &str) -> IResult<&str, StreamIDMap> {
         Ok((input, HashMap::from_iter(entries)))
     }
 }
-
-#[derive(Debug)]
-enum Error {
-    Panic,
-    IO(std::io::Error),
-    SRT(SrtError),
-    Broadcast(broadcast::error::SendError<ChannelMessage>)
-}
-
-impl From<std::io::Error> for Error {
-    fn from(err: std::io::Error) -> Self {
-        Self::IO(err)
-    }
-}
-
-impl From<SrtError> for Error {
-    fn from(err: SrtError) -> Self {
-        Self::SRT(err)
-    }
-}
-
-impl From<broadcast::error::SendError<ChannelMessage>> for Error {
-    fn from(err: broadcast::error::SendError<ChannelMessage>) -> Self {
-        Self::Broadcast(err)
-    }
-}
-
-type Result<T> = std::result::Result<T, Error>;
 
 async fn run() -> Result<()> {
     srt::startup()?;
@@ -164,69 +137,133 @@ async fn run() -> Result<()> {
 
 async fn handle_request(mut receiver: Receiver, mut stream: SrtAsyncStream, _client_addr: SocketAddr) -> Result<()> {
     'outer: loop {
-        let mut payload = SrtPayload::new();
-        for packet in payload.packets.iter_mut() {
+        let mut packets = Vec::with_capacity(7);
+        while packets.len() < 7 {
             match receiver.recv().await {
-                Ok(message) => { *packet = message.packet; }
+                Ok(message) => { packets.push(message.packet); }
                 Err(broadcast::error::RecvError::Closed) => { break 'outer; },
                 Err(broadcast::error::RecvError::Lagged(_)) => { println!("Client thread is lagging behind!"); }
             }
         }
-        let mut buf = BytesMut::with_capacity(1316);
-        payload.encode(&mut buf)?;
+        let payload = SrtPayload { packets };
+
+        let encoded_len = 1316;
+        let mut buf = BytesMut::with_capacity(encoded_len);
+        buf.resize(encoded_len, 0xFF);
+        let mut slice: &mut [u8] = &mut buf;
+        payload.encode(&mut slice)?;
+
+        //println!("request len = {}", buf.len());
+
+        /*
+        println!("request");
+        for byte in &buf {
+            print!("{:02X} ", byte);
+        }
+        println!("");
+        println!("");
+        */
+
         stream.write(&buf).await?;
     }
     Ok(())
 }
 
 async fn handle_publish(channel: Channel, mut stream: SrtAsyncStream, _client_addr: SocketAddr) -> Result<()> {
+    let mut pmt_pid: Option<u16> = None;
     loop {
         let mut buf = BytesMut::zeroed(1316);
         stream.read(&mut buf).await?;
-        let payload = SrtPayload::decode(buf.freeze())?;
-        for packet in payload.packets {
-            //println!("PID = 0x{:04X}", packet.pid());
-            match packet.pid() {
-                0x0 | 0x1000 => {
-                    let psi = packet.psi()?;
-                    if let Some([pat]) = psi.pats.as_deref() {
-                        println!("pmt_pid = 0x{:04X}", pat.pmt_pid);
-                    }
-                    if let Some([pmt]) = psi.pmts.as_deref() {
-                        match pmt.pcr_pid {
-                            Some(pid) => {
-                                println!("pcr_pid = 0x{:04X}", pid);
-                            },
-                            None => {
-                                println!("pcr_pid not present");
-                            }
-                        }
-                    }
-                    /*
-                    for byte in &packet.data {
-                        print!("{:02X} ", byte);
-                    }
-                    println!("");
-                    println!("");
-                    */
+        let frozen_buf = buf.freeze();
+        let mut slice: &[u8] = &frozen_buf;
 
+        let payload = SrtPayload::decode(&mut slice)?;
+
+        /*
+        println!("publish");
+        for byte in &frozen_buf {
+            print!("{:02X} ", byte);
+        }
+        println!("");
+        println!("");
+
+        let mut buf = BytesMut::zeroed(1316);
+        let mut slice: &mut [u8] = &mut buf;
+        payload.encode(&mut slice)?;
+
+        println!("request");
+        for byte in &buf {
+            print!("{:02X} ", byte);
+        }
+        println!("");
+        println!("");
+        */
+
+        for packet in &payload.packets {
+            //println!("PID = 0x{:04X}", packet.pid);
+            match packet.pid {
+                0x0 => {
                     if let Err(_) = channel.send_video(ChannelMessage::new(packet.clone())) {}
                     if let Err(_) = channel.send_audio0(ChannelMessage::new(packet.clone())) {}
                     if let Err(_) = channel.send_audio1(ChannelMessage::new(packet.clone())) {}
+
+                    let psi = packet.psi()?;
+                    if let Some(PsiData::Pat(ref pat)) = psi.data {
+                        pmt_pid = Some(pat.pmt_pid);
+                    }
                 }
                 0x100 => {
-                    if let Err(_) = channel.send_video(ChannelMessage::new(packet)) {}
+                    if let Err(_) = channel.send_video(ChannelMessage::new(packet.clone())) {}
                 },
                 0x101 => {
-                    if let Err(_) = channel.send_audio0(ChannelMessage::new(packet)) {}
+                    if let Err(_) = channel.send_audio0(ChannelMessage::new(packet.clone())) {}
                 }
                 0x102 => {
-                    if let Err(_) = channel.send_audio1(ChannelMessage::new(packet)) {}
+                    if let Err(_) = channel.send_audio1(ChannelMessage::new(packet.clone())) {}
                 }
-                _ => {
-                    println!("unhandled PID = 0x{:X}", packet.pid());
+                pid => {
+                    if Some(pid) == pmt_pid {
+                        //if let Err(_) = channel.send_video(ChannelMessage::new(packet.clone())) {}
+                        //if let Err(_) = channel.send_audio0(ChannelMessage::new(packet.clone())) {}
+                        //if let Err(_) = channel.send_audio1(ChannelMessage::new(packet.clone())) {}
+
+                        let psi = packet.psi()?;
+                        if let Some(PsiData::Pmt(ref pmt)) = psi.data {
+                            let mut audio = 0;
+                            for program_definition in &pmt.program_definitions {
+                                if program_definition.stream_type == 0x1B {
+                                    let mut new_packet = packet.clone();
+                                    let mut new_psi = new_packet.psi()?;
+                                    let Some(PsiData::Pmt(ref mut new_pmt)) = new_psi.data else { panic!() };
+                                    new_pmt.program_definitions = vec!(program_definition.clone());
+                                    new_packet.set_psi(new_psi)?;
+
+                                    if let Err(_) = channel.send_video(ChannelMessage::new(new_packet)) {}
+                                } else if program_definition.stream_type == 0x0F && audio < 2 {
+                                    let mut new_packet = packet.clone();
+                                    let mut new_psi = new_packet.psi()?;
+                                    let Some(PsiData::Pmt(ref mut new_pmt)) = new_psi.data else { panic!() };
+                                    new_pmt.program_definitions = vec!(program_definition.clone());
+                                    new_packet.set_psi(new_psi)?;
+
+                                    match audio {
+                                        0 => if let Err(_) = channel.send_audio0(ChannelMessage::new(new_packet)) {},
+                                        1 => if let Err(_) = channel.send_audio1(ChannelMessage::new(new_packet)) {},
+                                        _ => {}
+                                    }
+
+                                    audio += 1;
+                                }
+                                //println!("stream_type = 0x{:02X}", program_definition.stream_type);
+                                //println!("stream_pid = 0x{:04X}", program_definition.stream_pid);
+                            }
+                        }
+                    } else {
+                        //println!("unhandled PID = 0x{:X}", pid);
+                    }
                 }
             }
+
         }
     }
 
