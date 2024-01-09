@@ -145,26 +145,20 @@ async fn handle_request(mut receiver: Receiver, mut stream: SrtAsyncStream, _cli
                 Err(broadcast::error::RecvError::Lagged(_)) => { println!("Client thread is lagging behind!"); }
             }
         }
-        let payload = SrtPayload { packets };
 
-        let encoded_len = 1316;
-        let mut buf = BytesMut::with_capacity(encoded_len);
-        buf.resize(encoded_len, 0xFF);
-        let mut slice: &mut [u8] = &mut buf;
-        payload.encode(&mut slice)?;
+        const SIMULATED_PACKET_LOSS: f32 = 0.0;
+        let r = rand::random::<f32>();
+        if r > SIMULATED_PACKET_LOSS {
+            let payload = SrtPayload { packets };
 
-        //println!("request len = {}", buf.len());
+            let encoded_len = 1316;
+            let mut buf = BytesMut::with_capacity(encoded_len);
+            buf.resize(encoded_len, 0xFF);
+            let mut slice: &mut [u8] = &mut buf;
+            payload.encode(&mut slice)?;
 
-        /*
-        println!("request");
-        for byte in &buf {
-            print!("{:02X} ", byte);
+            stream.write(&buf).await?;
         }
-        println!("");
-        println!("");
-        */
-
-        stream.write(&buf).await?;
     }
     Ok(())
 }
