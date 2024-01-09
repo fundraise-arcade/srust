@@ -57,7 +57,8 @@ async fn run() -> Result<()> {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 1337));
     let builder = srt::async_builder()
-        .set_live_transmission_type();
+        .set_live_transmission_type()
+        .set_receive_latency(1000);
 
     let listener = builder.listen(addr, 5, Some(|socket, stream_id| {
         //println!("{}", stream_id);
