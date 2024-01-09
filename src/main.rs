@@ -222,31 +222,36 @@ async fn handle_publish(mut channel: Channel, mut stream: SrtAsyncStream, _clien
                         if let Some(PsiData::Pmt(ref pmt)) = psi.data {
                             let mut audio = 0;
                             for program_definition in &pmt.program_definitions {
-                                if program_definition.stream_type == 0x1B {
-                                    let mut new_packet = packet.clone();
-                                    let mut new_psi = new_packet.psi()?;
-                                    let Some(PsiData::Pmt(ref mut new_pmt)) = new_psi.data else { panic!() };
-                                    new_pmt.program_definitions = vec!(program_definition.clone());
-                                    new_packet.set_psi(new_psi)?;
+                                match program_definition.stream_type {
+                                    0x1B | 0x24 => {
+                                        let mut new_packet = packet.clone();
+                                        let mut new_psi = new_packet.psi()?;
+                                        let Some(PsiData::Pmt(ref mut new_pmt)) = new_psi.data else { panic!() };
+                                        new_pmt.program_definitions = vec!(program_definition.clone());
+                                        new_packet.set_psi(new_psi)?;
 
-                                    channel.send_video(ChannelMessage::new(new_packet));
-                                } else if program_definition.stream_type == 0x0F && audio < 2 {
-                                    let mut new_packet = packet.clone();
-                                    let mut new_psi = new_packet.psi()?;
-                                    let Some(PsiData::Pmt(ref mut new_pmt)) = new_psi.data else { panic!() };
-                                    new_pmt.program_definitions = vec!(program_definition.clone());
-                                    new_packet.set_psi(new_psi)?;
+                                        channel.send_video(ChannelMessage::new(new_packet));
+                                    },
+                                    0x0F => if audio < 2 {
+                                        let mut new_packet = packet.clone();
+                                        let mut new_psi = new_packet.psi()?;
+                                        let Some(PsiData::Pmt(ref mut new_pmt)) = new_psi.data else { panic!() };
+                                        new_pmt.program_definitions = vec!(program_definition.clone());
+                                        new_packet.set_psi(new_psi)?;
 
-                                    match audio {
-                                        0 => channel.send_audio0(ChannelMessage::new(new_packet)),
-                                        1 => channel.send_audio1(ChannelMessage::new(new_packet)),
-                                        _ => {}
+                                        match audio {
+                                            0 => channel.send_audio0(ChannelMessage::new(new_packet)),
+                                            1 => channel.send_audio1(ChannelMessage::new(new_packet)),
+                                            _ => {}
+                                        }
+
+                                        audio += 1;
+                                    },
+                                    _ => {
+                                        println!("stream_type = 0x{:02X}", program_definition.stream_type);
+                                        //println!("stream_pid = 0x{:04X}", program_definition.stream_pid);
                                     }
-
-                                    audio += 1;
                                 }
-                                //println!("stream_type = 0x{:02X}", program_definition.stream_type);
-                                //println!("stream_pid = 0x{:04X}", program_definition.stream_pid);
                             }
                         }
                     } else {
