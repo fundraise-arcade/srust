@@ -7,7 +7,7 @@ use crate::channel::*;
 use crate::error::*;
 use crate::mpegts::*;
 use srt_rs as srt;
-use srt_rs::SrtAsyncStream;
+use srt_rs::{SrtAsyncListener, SrtAsyncStream};
 use srt_rs::error::SrtRejectReason;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -48,44 +48,7 @@ fn stream_id_parser(input: &str) -> IResult<&str, StreamIDMap> {
     }
 }
 
-async fn run() -> Result<()> {
-    srt::startup()?;
-
-    let mut channels: HashMap<String, Channel> = HashMap::new();
-
-    channels.insert("default".to_string(), Channel::new());
-
-    let addr = SocketAddr::from(([0, 0, 0, 0], 1337));
-    let builder = srt::async_builder()
-        .set_live_transmission_type()
-        .set_receive_latency(1000);
-
-    let listener = builder.listen(addr, 5, Some(|socket, stream_id| {
-        //println!("{}", stream_id);
-        match stream_id_parser(stream_id) {
-            Ok((_, dict)) => {
-                //println!("{:?}", dict);
-                match dict.get("u") {
-                    Some(_user) => {
-                        socket.set_passphrase("SecurePassphrase1").map_err(|_| SrtRejectReason::Predefined(500))?;
-                        match dict.get("m").unwrap_or(&"request") {
-                            &"request" => {
-                                match dict.get("r") {
-                                    Some(_resource) => Ok(()),
-                                    None => Err(SrtRejectReason::Predefined(403)) // default to resource forbidden
-                                }
-                            },
-                            &"publish" => Ok(()),
-                            _ => Err(SrtRejectReason::Predefined(405))
-                        }
-                    },
-                    None => Err(SrtRejectReason::Predefined(401))
-                }
-            }
-            Err(_) => Err(SrtRejectReason::Predefined(400))
-        }
-    }))?;
-
+async fn accept(channels: &mut HashMap<String, Channel>, listener: &SrtAsyncListener) -> Result<()> {
     loop {
         let (stream, client_addr) = listener.accept().await?;
         let stream_id = stream.get_stream_id()?;
@@ -130,6 +93,54 @@ async fn run() -> Result<()> {
             },
             _ => return Err(Error::Panic)
         }
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+    }
+}
+
+async fn run() -> Result<()> {
+    srt::startup()?;
+
+    let mut channels: HashMap<String, Channel> = HashMap::new();
+
+    channels.insert("default".to_string(), Channel::new());
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], 1337));
+    let builder = srt::async_builder()
+        .set_live_transmission_type()
+        .set_receive_latency(1000);
+
+    let listener = builder.listen(addr, 5, Some(|socket, stream_id| {
+        //println!("{}", stream_id);
+        match stream_id_parser(stream_id) {
+            Ok((_, dict)) => {
+                //println!("{:?}", dict);
+                match dict.get("u") {
+                    Some(_user) => {
+                        socket.set_passphrase("SecurePassphrase1").map_err(|_| SrtRejectReason::Predefined(500))?;
+                        match dict.get("m").unwrap_or(&"request") {
+                            &"request" => {
+                                match dict.get("r") {
+                                    Some(_resource) => Ok(()),
+                                    None => Err(SrtRejectReason::Predefined(403)) // default to resource forbidden
+                                }
+                            },
+                            &"publish" => Ok(()),
+                            _ => Err(SrtRejectReason::Predefined(405))
+                        }
+                    },
+                    None => Err(SrtRejectReason::Predefined(401))
+                }
+            }
+            Err(_) => Err(SrtRejectReason::Predefined(400))
+        }
+    }))?;
+
+    loop {
+        match accept(&mut channels, &listener).await {
+            Ok(()) => (),
+            Err(e) => println!("Error in accepter: {:?}", e)
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
     }
 
     // unreachable
