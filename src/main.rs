@@ -160,7 +160,7 @@ async fn handle_request(mut receiver: Receiver, mut stream: SrtAsyncStream, _cli
 
         const SIMULATED_PACKET_LOSS: f32 = 0.0;
         let r = rand::random::<f32>();
-        if r > SIMULATED_PACKET_LOSS {
+        if r >= SIMULATED_PACKET_LOSS {
             let payload = SrtPayload { packets };
 
             let encoded_len = 1316;
