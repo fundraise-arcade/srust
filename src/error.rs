@@ -3,6 +3,8 @@ use srt_rs::error::SrtError;
 #[derive(Debug)]
 pub enum Error {
     Panic,
+    InvalidStreamId,
+    NoChannel,
     NoSync,
     NoPayload,
     ChannelSend,

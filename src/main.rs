@@ -1,11 +1,15 @@
 mod channel;
 mod error;
 mod mpegts;
+mod streamopts;
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD_NO_PAD;
 use bytes::BytesMut;
 use crate::channel::*;
 use crate::error::*;
 use crate::mpegts::*;
+use crate::streamopts::StreamOpts;
 use srt_rs as srt;
 use srt_rs::{SrtAsyncListener, SrtAsyncStream};
 use srt_rs::error::SrtRejectReason;
@@ -14,85 +18,44 @@ use std::net::SocketAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::broadcast;
 
-use nom::{
-    IResult,
-    bytes::complete::{tag, take_while1},
-    character::complete::char,
-    multi::separated_list0,
-    sequence::separated_pair
-};
-
-type StreamIDMap<'a> = HashMap<&'a str, &'a str>;
-
-fn is_key_character(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '_'
-}
-
-fn is_value_character(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '/'
-}
-
-fn key_value_parser(input: &str) -> IResult<&str, (&str, &str)> {
-    let before = take_while1(is_key_character);
-    let after = take_while1(is_value_character);
-    separated_pair(before, char('='), after)(input)
-}
-
-fn stream_id_parser(input: &str) -> IResult<&str, StreamIDMap> {
-    if input.is_empty() {
-        Ok((input, HashMap::new()))
-    } else {
-        let (input, _) = tag("#!::")(input)?;
-        let (input, entries) = separated_list0(char(','), key_value_parser)(input)?;
-        Ok((input, HashMap::from_iter(entries)))
+fn decode_stream_id(input: &str) -> Result<StreamOpts> {
+    if !input.starts_with("#!R") {
+        return Err(Error::InvalidStreamId);
     }
+    let input = &input[3..];
+
+    let mut buf = BytesMut::zeroed(8);
+    STANDARD_NO_PAD.decode_slice(input, &mut buf).map_err(|_| Error::InvalidStreamId)?;
+    StreamOpts::decode(&buf.freeze())
 }
 
-async fn accept(channels: &mut HashMap<String, Channel>, listener: &SrtAsyncListener) -> Result<()> {
+async fn accept(channels: &mut HashMap<u16, Channel>, listener: &SrtAsyncListener) -> Result<()> {
     loop {
         let (stream, client_addr) = listener.accept().await?;
         let stream_id = stream.get_stream_id()?;
         println!("Accepted connection from {} ({})", client_addr, stream_id);
 
-        let (_, dict) = stream_id_parser(&stream_id).expect("stream_id_parser");
-        match dict.get("m").unwrap_or(&"request") {
-            &"request" => {
-                let resource = dict.get("r").expect("dict.get(\"r\")");
-                let parts: Vec<&str> = resource.split('/').collect();
-                //println!("parts = {:?}", parts);
-                if parts.len() < 2 { return Err(Error::Panic) }
+        let streamopts = decode_stream_id(&stream_id).expect("decode_stream_id");
 
-                if let Some(channel) = channels.get(&parts[0].to_string()) {
-                    let maybe = match parts[1] {
-                        "v0" => Some(channel.receiver_video()),
-                        "a0" => Some(channel.receiver_audio0()),
-                        "a1" => Some(channel.receiver_audio1()),
-                        _ => None
-                    };
-                    match maybe {
-                        Some(receiver) => {
-                            tokio::spawn(async move {
-                                if let Err(e) = handle_request(receiver, stream, client_addr).await {
-                                    println!("Error handling request from {}: {:?}", client_addr, e);
-                                }
-                            });
-                        },
-                        None => return Err(Error::Panic)
-                    }
+        if streamopts.is_publisher() {
+            channels.insert(streamopts.user, Channel::new());
+            let channel = channels.get(&streamopts.user).expect("channels.get").clone();
+            tokio::spawn(async move {
+                if let Err(e) = handle_publish(channel, stream, client_addr).await {
+                    println!("Error handling publish from {}: {:?}", client_addr, e);
                 }
-            },
-            &"publish" => {
-                let user = dict.get("u").expect("dict.get(\"u\")").to_string();
-                channels.insert(user.clone(), Channel::new());
-                let channel = channels.get(&user).expect("channels.get(&user)").clone();
+            });
+        } else {
+            if let Some(channel) = channels.get(&streamopts.target.expect("streamopts.target")) {
+                let receiver = channel.receiver_video();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_publish(channel, stream, client_addr).await {
-                        println!("Error handling publish from {}: {:?}", client_addr, e);
+                    if let Err(e) = handle_request(receiver, stream, client_addr).await {
+                        println!("Error handling request from {}: {:?}", client_addr, e);
                     }
                 });
-            },
-            _ => return Err(Error::Panic)
+            } else { return Err(Error::NoChannel); }
         }
+
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
     }
 }
@@ -100,9 +63,8 @@ async fn accept(channels: &mut HashMap<String, Channel>, listener: &SrtAsyncList
 async fn run() -> Result<()> {
     srt::startup()?;
 
-    let mut channels: HashMap<String, Channel> = HashMap::new();
-
-    channels.insert("default".to_string(), Channel::new());
+    let mut channels: HashMap<u16, Channel> = HashMap::new();
+    //channels.insert("default".to_string(), Channel::new());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 1337));
     let builder = srt::async_builder()
@@ -111,26 +73,12 @@ async fn run() -> Result<()> {
 
     let listener = builder.listen(addr, 5, Some(|socket, stream_id| {
         //println!("{}", stream_id);
-        match stream_id_parser(stream_id) {
-            Ok((_, dict)) => {
-                //println!("{:?}", dict);
-                match dict.get("u") {
-                    Some(_user) => {
-                        socket.set_passphrase("SecurePassphrase1").map_err(|_| SrtRejectReason::Predefined(500))?;
-                        match dict.get("m").unwrap_or(&"request") {
-                            &"request" => {
-                                match dict.get("r") {
-                                    Some(_resource) => Ok(()),
-                                    None => Err(SrtRejectReason::Predefined(403)) // default to resource forbidden
-                                }
-                            },
-                            &"publish" => Ok(()),
-                            _ => Err(SrtRejectReason::Predefined(405))
-                        }
-                    },
-                    None => Err(SrtRejectReason::Predefined(401))
-                }
-            }
+        match decode_stream_id(&stream_id) {
+            Ok(streamopts) => {
+                println!("{:?}", streamopts);
+                socket.set_passphrase("SecurePassphrase1").map_err(|_| SrtRejectReason::Predefined(500))?;
+                Ok(())
+            },
             Err(_) => Err(SrtRejectReason::Predefined(400))
         }
     }))?;
