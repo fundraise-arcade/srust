@@ -9,7 +9,7 @@ use bytes::BytesMut;
 use crate::channel::*;
 use crate::error::*;
 use crate::mpegts::*;
-use crate::streamopts::StreamOpts;
+use crate::streamopts::{StreamOpts, StreamTrack};
 use srt_rs as srt;
 use srt_rs::{SrtAsyncListener, SrtAsyncStream};
 use srt_rs::error::SrtRejectReason;
@@ -24,8 +24,9 @@ fn decode_stream_id(input: &str) -> Result<StreamOpts> {
     }
     let input = &input[3..];
 
-    let mut buf = BytesMut::zeroed(8);
-    STANDARD_NO_PAD.decode_slice(input, &mut buf).map_err(|_| Error::InvalidStreamId)?;
+    let mut buf = BytesMut::zeroed(16);
+    let size = STANDARD_NO_PAD.decode_slice(input, &mut buf).map_err(|_| Error::InvalidStreamId)?;
+    buf.truncate(size);
     StreamOpts::decode(&buf.freeze())
 }
 
@@ -46,8 +47,13 @@ async fn accept(channels: &mut HashMap<u16, Channel>, listener: &SrtAsyncListene
                 }
             });
         } else {
-            if let Some(channel) = channels.get(&streamopts.target.expect("streamopts.target")) {
-                let receiver = channel.receiver_video();
+            let target = &streamopts.target.expect("streamopts.target");
+            if let Some(channel) = channels.get(&target.user) {
+                let receiver = match target.track {
+                    StreamTrack::Video => channel.receiver_video(),
+                    StreamTrack::ContentAudio => channel.receiver_audio0(),
+                    StreamTrack::CommentaryAudio => channel.receiver_audio1(),
+                };
                 tokio::spawn(async move {
                     if let Err(e) = handle_request(receiver, stream, client_addr).await {
                         println!("Error handling request from {}: {:?}", client_addr, e);
@@ -72,14 +78,16 @@ async fn run() -> Result<()> {
         .set_receive_latency(1000);
 
     let listener = builder.listen(addr, 5, Some(|socket, stream_id| {
-        //println!("{}", stream_id);
         match decode_stream_id(&stream_id) {
             Ok(streamopts) => {
-                println!("{:?}", streamopts);
+                println!("Accepting stream ID: {:?}", streamopts);
                 socket.set_passphrase("SecurePassphrase1").map_err(|_| SrtRejectReason::Predefined(500))?;
                 Ok(())
             },
-            Err(_) => Err(SrtRejectReason::Predefined(400))
+            Err(e) => {
+                println!("Rejecting stream ID: {:?}", e);
+                Err(SrtRejectReason::Predefined(400))
+            }
         }
     }))?;
 
