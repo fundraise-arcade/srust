@@ -1,13 +1,12 @@
 mod channel;
 mod error;
 mod mpegts;
-mod streamid;
 
 use bytes::BytesMut;
 use crate::channel::*;
 use crate::error::*;
 use crate::mpegts::*;
-use crate::streamid::{decode_stream_id, StreamTrack};
+use streamid::{decode_stream_id, StreamTrack};
 use srt_rs as srt;
 use srt_rs::{SrtAsyncListener, SrtAsyncStream};
 use srt_rs::error::SrtRejectReason;
