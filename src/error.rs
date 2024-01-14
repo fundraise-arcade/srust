@@ -6,7 +6,6 @@ pub enum Error {
     InvalidStreamId,
     NoSync,
     NoPayload,
-    ChannelSend,
     IO(std::io::Error),
     SRT(SrtError)
 }

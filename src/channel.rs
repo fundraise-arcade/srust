@@ -1,4 +1,3 @@
-use crate::error::*;
 use crate::MpegTsPacket;
 use std::collections::VecDeque;
 use tokio::sync::broadcast;
@@ -15,53 +14,6 @@ impl ChannelMessage {
 }
 
 type InternalChannelMessage = VecDeque<ChannelMessage>;
-
-/*
-#[derive(Clone, Debug)]
-struct InternalChannelMessage {
-    pub messages: Vec<ChannelMessage>
-}
-
-impl InternalChannelMessage {
-    pub fn new() -> Self {
-        Self {
-            messages: Vec::new()
-        }
-    }
-
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self {
-            messages: Vec::with_capacity(capacity)
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.messages.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.messages.len()
-    }
-
-    pub fn push(&mut self, message: ChannelMessage) {
-        self.messages.push(message)
-    }
-
-    pub fn pop(&mut self) -> Option<ChannelMessage> {
-        self.messages.pop()
-    }
-
-    pub fn clear(&mut self) {
-        self.messages.clear()
-    }
-}
-*/
-
-impl From<broadcast::error::SendError<InternalChannelMessage>> for Error {
-    fn from(_: broadcast::error::SendError<InternalChannelMessage>) -> Self {
-        Self::ChannelSend
-    }
-}
 
 #[derive(Clone)]
 pub struct Channel {
