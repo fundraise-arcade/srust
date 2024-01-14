@@ -1,15 +1,13 @@
 mod channel;
 mod error;
 mod mpegts;
-mod streamopts;
+mod streamid;
 
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD_NO_PAD;
 use bytes::BytesMut;
 use crate::channel::*;
 use crate::error::*;
 use crate::mpegts::*;
-use crate::streamopts::{StreamOpts, StreamTrack};
+use crate::streamid::{decode_stream_id, StreamTrack};
 use srt_rs as srt;
 use srt_rs::{SrtAsyncListener, SrtAsyncStream};
 use srt_rs::error::SrtRejectReason;
@@ -17,18 +15,6 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::broadcast;
-
-fn decode_stream_id(input: &str) -> Result<StreamOpts> {
-    if !input.starts_with("#!R") {
-        return Err(Error::InvalidStreamId);
-    }
-    let input = &input[3..];
-
-    let mut buf = BytesMut::zeroed(16);
-    let size = STANDARD_NO_PAD.decode_slice(input, &mut buf).map_err(|_| Error::InvalidStreamId)?;
-    buf.truncate(size);
-    StreamOpts::decode(&buf.freeze())
-}
 
 async fn accept(channels: &mut HashMap<u16, Channel>, listener: &SrtAsyncListener) -> Result<()> {
     loop {

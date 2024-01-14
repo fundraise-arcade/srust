@@ -1,8 +1,23 @@
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD_NO_PAD;
 use byteorder::{BigEndian, ReadBytesExt};
+use bytes::BytesMut;
 use crate::error::*;
 
+pub fn decode_stream_id(input: &str) -> Result<StreamId> {
+    if !input.starts_with("#!R") {
+        return Err(Error::InvalidStreamId);
+    }
+    let input = &input[3..];
+
+    let mut buf = BytesMut::zeroed(16);
+    let size = STANDARD_NO_PAD.decode_slice(input, &mut buf).map_err(|_| Error::InvalidStreamId)?;
+    buf.truncate(size);
+    StreamId::decode(&buf.freeze())
+}
+
 #[derive(Debug)]
-pub struct StreamOpts {
+pub struct StreamId {
     pub version: u16,
     pub user: u16,
     pub target: Option<StreamTarget>
@@ -34,7 +49,7 @@ impl TryFrom<u8> for StreamTrack {
     }
 }
 
-impl StreamOpts {
+impl StreamId {
     pub fn decode(mut buf: &[u8]) -> Result<Self> {
         let flags = buf.read_u16::<BigEndian>()?;
         let publisher = ((flags >> 15) & 0b1) != 0;
@@ -49,7 +64,7 @@ impl StreamOpts {
             None
         };
 
-        Ok(StreamOpts {
+        Ok(Self {
             version,
             user,
             target

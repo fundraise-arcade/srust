@@ -12,7 +12,7 @@ WORKDIR /usr/src/srt-rust-server
 
 # build dependencies with dummy main file
 COPY ./Cargo.toml ./
-RUN mkdir src/ && echo "fn main() {}" > src/main.rs
+RUN mkdir src/ && echo "fn main() {}" > src/main.rs && touch src/lib.rs
 RUN cargo build --release
 
 COPY ./ ./

@@ -1,5 +1,5 @@
 [package]
-name = "srt-rust-server"
+name = "srust"
 version = "0.1.0"
 edition = "2021"
 
@@ -15,3 +15,11 @@ rand = "0.8.5"
 srt-rs = { git = "https://github.com/fundraise-arcade/srt-rs.git", version = "0.3.0" }
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7.10", features = ["codec"] }
+
+[lib]
+name = "libsrust"
+path = "src/lib.rs"
+
+[[bin]]
+name = "srust"
+path = "src/main.rs"
