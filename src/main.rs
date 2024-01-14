@@ -39,8 +39,7 @@ async fn accept(channels: &mut HashMap<u16, Channel>, listener: &SrtAsyncListene
         let streamopts = decode_stream_id(&stream_id).expect("decode_stream_id");
 
         if streamopts.is_publisher() {
-            channels.insert(streamopts.user, Channel::new());
-            let channel = channels.get(&streamopts.user).expect("channels.get").clone();
+            let channel = channels.entry(streamopts.user).or_insert(Channel::new()).clone();
             tokio::spawn(async move {
                 if let Err(e) = handle_publish(channel, stream, client_addr).await {
                     println!("Error handling publish from {}: {:?}", client_addr, e);
@@ -48,18 +47,17 @@ async fn accept(channels: &mut HashMap<u16, Channel>, listener: &SrtAsyncListene
             });
         } else {
             let target = &streamopts.target.expect("streamopts.target");
-            if let Some(channel) = channels.get(&target.user) {
-                let receiver = match target.track {
-                    StreamTrack::Video => channel.receiver_video(),
-                    StreamTrack::ContentAudio => channel.receiver_audio0(),
-                    StreamTrack::CommentaryAudio => channel.receiver_audio1(),
-                };
-                tokio::spawn(async move {
-                    if let Err(e) = handle_request(receiver, stream, client_addr).await {
-                        println!("Error handling request from {}: {:?}", client_addr, e);
-                    }
-                });
-            } else { return Err(Error::NoChannel); }
+            let channel = channels.entry(target.user).or_insert(Channel::new());
+            let receiver = match target.track {
+                StreamTrack::Video => channel.receiver_video(),
+                StreamTrack::ContentAudio => channel.receiver_audio0(),
+                StreamTrack::CommentaryAudio => channel.receiver_audio1(),
+            };
+            tokio::spawn(async move {
+                if let Err(e) = handle_request(receiver, stream, client_addr).await {
+                    println!("Error handling request from {}: {:?}", client_addr, e);
+                }
+            });
         }
 
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
