@@ -2,16 +2,31 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD_NO_PAD;
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::BytesMut;
-use crate::error::*;
+
+#[derive(Debug)]
+pub enum Error {
+    InvalidPrefix,
+    InvalidEncoding,
+    InvalidTrack,
+    IO(std::io::Error),
+}
+
+impl From<std::io::Error> for Error {
+    fn from(err: std::io::Error) -> Self {
+        Self::IO(err)
+    }
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 pub fn decode_stream_id(input: &str) -> Result<StreamId> {
     if !input.starts_with("#!R") {
-        return Err(Error::InvalidStreamId);
+        return Err(Error::InvalidPrefix);
     }
     let input = &input[3..];
 
     let mut buf = BytesMut::zeroed(16);
-    let size = STANDARD_NO_PAD.decode_slice(input, &mut buf).map_err(|_| Error::InvalidStreamId)?;
+    let size = STANDARD_NO_PAD.decode_slice(input, &mut buf).map_err(|_| Error::InvalidEncoding)?;
     buf.truncate(size);
     StreamId::decode(&buf.freeze())
 }
@@ -44,7 +59,7 @@ impl TryFrom<u8> for StreamTrack {
             0 => Ok(Self::Video),
             1 => Ok(Self::ContentAudio),
             2 => Ok(Self::CommentaryAudio),
-            _ => Err(Error::InvalidStreamId)
+            _ => Err(Error::InvalidTrack)
         }
     }
 }
