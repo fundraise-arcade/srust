@@ -6,7 +6,7 @@ use bytes::BytesMut;
 use crate::channel::*;
 use crate::error::*;
 use crate::mpegts::*;
-use streamid::{decode_stream_id, StreamTrack};
+use streamid::{decode_streamid, StreamTrack};
 use srt_rs as srt;
 use srt_rs::{SrtAsyncListener, SrtAsyncStream};
 use srt_rs::error::SrtRejectReason;
@@ -21,7 +21,7 @@ async fn accept(channels: &mut HashMap<u16, Channel>, listener: &SrtAsyncListene
         let stream_id = stream.get_stream_id()?;
         println!("Accepted connection from {} ({})", client_addr, stream_id);
 
-        let streamopts = decode_stream_id(&stream_id).expect("decode_stream_id");
+        let streamopts = decode_streamid(&stream_id).expect("decode_streamid");
 
         if streamopts.is_publisher() {
             let channel = channels.entry(streamopts.user).or_insert(Channel::new()).clone();
@@ -61,7 +61,7 @@ async fn run() -> Result<()> {
         .set_receive_latency(1000);
 
     let listener = builder.listen(addr, 5, Some(|socket, stream_id| {
-        match decode_stream_id(&stream_id) {
+        match decode_streamid(&stream_id) {
             Ok(streamopts) => {
                 println!("Accepting stream ID: {:?}", streamopts);
                 socket.set_passphrase("SecurePassphrase1").map_err(|_| SrtRejectReason::Predefined(500))?;
