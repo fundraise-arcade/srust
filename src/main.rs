@@ -18,20 +18,20 @@ use tokio::sync::broadcast;
 async fn accept(channels: &mut HashMap<u16, Channel>, listener: &SrtAsyncListener) -> Result<()> {
     loop {
         let (stream, client_addr) = listener.accept().await?;
-        let stream_id = stream.get_stream_id()?;
-        println!("Accepted connection from {} ({})", client_addr, stream_id);
+        let streamid_str = stream.get_stream_id()?;
+        println!("Accepted connection from {} ({})", client_addr, streamid_str);
 
-        let streamopts = decode_streamid(&stream_id).expect("decode_streamid");
+        let streamid = decode_streamid(&streamid_str).expect("decode_streamid");
 
-        if streamopts.is_publisher() {
-            let channel = channels.entry(streamopts.user).or_insert(Channel::new()).clone();
+        if streamid.is_publisher() {
+            let channel = channels.entry(streamid.user).or_insert(Channel::new()).clone();
             tokio::spawn(async move {
                 if let Err(e) = handle_publish(channel, stream, client_addr).await {
                     println!("Error handling publish from {}: {:?}", client_addr, e);
                 }
             });
         } else {
-            let target = &streamopts.target.expect("streamopts.target");
+            let target = &streamid.target.expect("streamid.target");
             let channel = channels.entry(target.user).or_insert(Channel::new());
             let receiver = match target.track {
                 StreamTrack::Video => channel.receiver_video(),
@@ -60,11 +60,15 @@ async fn run() -> Result<()> {
         .set_live_transmission_type()
         .set_receive_latency(1000);
 
-    let listener = builder.listen(addr, 5, Some(|socket, stream_id| {
-        match decode_streamid(&stream_id) {
-            Ok(streamopts) => {
-                println!("Accepting stream ID: {:?}", streamopts);
-                socket.set_passphrase("SecurePassphrase1").map_err(|_| SrtRejectReason::Predefined(500))?;
+    let listener = builder.listen(addr, 5, Some(|socket, streamid_str| {
+        match decode_streamid(&streamid_str) {
+            Ok(streamid) => {
+                println!("Accepting stream ID: {:?}", streamid);
+                if streamid.user == 0 && !streamid.is_publisher() {
+                    socket.set_passphrase("RestreamPassphrase1").map_err(|_| SrtRejectReason::Predefined(500))?;
+                } else {
+                    socket.set_passphrase("SecurePassphrase1").map_err(|_| SrtRejectReason::Predefined(500))?;
+                }
                 Ok(())
             },
             Err(e) => {
